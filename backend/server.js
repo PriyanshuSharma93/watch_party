@@ -9,19 +9,44 @@ import { Store } from './store.js';
 const ASSIGNABLE = ['moderator', 'participant', 'viewer'];
 const REACTIONS = ['👍', '😂', '😮', '❤️', '🔥', '👏'];
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const ORIGIN = process.env.CLIENT_ORIGIN || '*'; // optional: set to your frontend URL to lock CORS down
 
 const store = new Store();
 const mgr = new RoomManager(store);
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: '*' } });
-app.use(cors());
-app.use(express.json());
+const io = new Server(server, { cors: { origin: ORIGIN } });
+app.disable('x-powered-by');
+app.use(cors({ origin: ORIGIN }));
+app.use(express.json({ limit: '10kb' }));
+app.use((_req, res, next) => { res.set({ 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' }); next(); });
+
+// Tiny in-memory rate limiter (per client IP, fixed window). Enough for a single instance.
+function rateLimit({ windowMs, max }) {
+  const hits = new Map();
+  setInterval(() => hits.clear(), windowMs).unref();
+  return (req, res, next) => {
+    const ip = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.ip;
+    const n = (hits.get(ip) || 0) + 1;
+    hits.set(ip, n);
+    if (n > max) return res.status(429).json({ error: 'Too many attempts. Please wait a minute and try again.' });
+    next();
+  };
+}
+app.use('/api/login', rateLimit({ windowMs: 60_000, max: 20 }));
+app.use('/api/register', rateLimit({ windowMs: 60_000, max: 20 }));
+
+// Wraps async routes so a thrown error becomes a clean 500 instead of a hanging request.
+const safe = (fn) => (req, res) => fn(req, res).catch((e) => {
+  console.error(e);
+  res.status(500).json({ error: 'Server error. Please try again.' });
+});
 
 // ---------- REST: authentication + room list ----------
 app.get('/', (_req, res) => res.send('Watch Party backend is running'));
+app.get('/health', (_req, res) => res.json({ ok: true, uptime: Math.round(process.uptime()) }));
 
-app.post('/api/register', async (req, res) => {
+app.post('/api/register', safe(async (req, res) => {
   const name = String(req.body?.name || '').trim();
   const email = String(req.body?.email || '').trim().toLowerCase();
   const password = String(req.body?.password || '');
@@ -31,16 +56,16 @@ app.post('/api/register', async (req, res) => {
   if (store.findUserByEmail(email)) return res.status(409).json({ error: 'An account with this email already exists.' });
   const user = store.createUser(name, email, await hashPassword(password));
   res.json({ token: signToken(user), user });
-});
+}));
 
-app.post('/api/login', async (req, res) => {
+app.post('/api/login', safe(async (req, res) => {
   const email = String(req.body?.email || '').trim().toLowerCase();
   const password = String(req.body?.password || '');
   const row = store.findUserByEmail(email);
   if (!row || !(await checkPassword(password, row.passwordHash))) return res.status(401).json({ error: 'Wrong email or password.' });
   const user = { id: row.id, username: row.name, email: row.email };
   res.json({ token: signToken(user), user });
-});
+}));
 
 app.get('/api/me', requireAuth, (req, res) => res.json({ user: { id: req.user.id, username: req.user.username } }));
 app.get('/api/rooms', requireAuth, (req, res) => res.json({ rooms: store.roomsFor(req.user.id) }));
@@ -224,6 +249,10 @@ io.on('connection', (socket) => {
   });
   socket.on('resync', () => { const { room } = ctx(); if (room) socket.emit('sync_state', room.snapshot()); });
 });
+
+// Keep the server alive on unexpected errors (they are logged for debugging).
+process.on('unhandledRejection', (e) => console.error('Unhandled rejection:', e));
+process.on('uncaughtException', (e) => console.error('Uncaught exception:', e));
 
 const PORT = process.env.PORT || 4000;
 server.listen(PORT, () => console.log(`Backend running on http://localhost:${PORT}`));

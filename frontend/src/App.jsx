@@ -87,7 +87,7 @@ function AuthPage({ onAuth }) {
       setDone(true);
       setTimeout(() => onAuth(d.token, d.user, remember), 900);
     } catch (x) {
-      setErr(x.message === 'Failed to fetch' ? 'Cannot reach the backend. Start it with npm start in the backend folder.' : x.message);
+      setErr(x.message === 'Failed to fetch' ? 'The server is waking up or unreachable. Wait a few seconds and try again.' : x.message);
       setShake(true); setTimeout(() => setShake(false), 500);
       setBusy(false);
     }
@@ -281,6 +281,26 @@ const THEMES = [['violet', '#7c5cff'], ['ocean', '#22b8cf'], ['sunset', '#ff7a45
 export default function App() {
   const [theme, setTheme] = useState(() => localStorage.getItem('wp-theme') || 'violet');
   const [splash, setSplash] = useState(() => !sessionStorage.getItem('wp-splash'));
+  // Free hosting sleeps when idle, so wake the backend as soon as the page opens and tell the user.
+  const [server, setServer] = useState('checking'); // checking | waking | ready | ok
+  useEffect(() => {
+    let alive = true, tries = 0, woke = false;
+    const hint = setTimeout(() => { if (alive) { woke = true; setServer((s) => (s === 'checking' ? 'waking' : s)); } }, 2500);
+    const ping = async () => {
+      try {
+        const r = await fetch(`${API}/health`);
+        if (r.status < 500) {
+          if (!alive) return;
+          setServer(woke ? 'ready' : 'ok');
+          setTimeout(() => alive && setServer('ok'), 2500);
+          return;
+        }
+      } catch { /* server still asleep */ }
+      if (alive && ++tries < 40) { woke = true; setServer('waking'); setTimeout(ping, 3000); }
+    };
+    ping();
+    return () => { alive = false; clearTimeout(hint); };
+  }, []);
   useEffect(() => { document.documentElement.dataset.theme = theme; localStorage.setItem('wp-theme', theme); }, [theme]);
   // Spotlight that follows the cursor (see body::before in style.css).
   useEffect(() => {
@@ -292,6 +312,11 @@ export default function App() {
   return (
     <>
       <Screens />
+      {(server === 'waking' || server === 'ready') && (
+        <div className={`wake ${server}`} role="status">
+          {server === 'waking' ? <><span className="spin" /> Waking up the server. Free hosting sleeps when idle, this can take up to a minute…</> : '✅ Server is ready'}
+        </div>
+      )}
       {splash && <Splash onDone={() => { sessionStorage.setItem('wp-splash', '1'); setSplash(false); }} />}
       <div className="dock" role="group" aria-label="Colour theme">
         {THEMES.map(([name, color]) => (

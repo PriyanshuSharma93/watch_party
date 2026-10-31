@@ -45,7 +45,19 @@ npm run dev        # http://localhost:5173
 | backend | `JWT_SECRET` | Secret used to sign login tokens (set a long random value) |
 | backend | `PORT` | Provided by the host |
 | backend | `DB_PATH` | Optional SQLite file path (default `data/watchparty.db`) |
+| backend | `CLIENT_ORIGIN` | Optional. Your frontend URL, to restrict CORS (default: allow all) |
 | frontend | `VITE_API_URL` | Backend URL, e.g. `https://your-backend.onrender.com` |
+
+## Tests
+With the backend running: `cd backend && npm test`. To test the live API: `BASE=https://your-api.onrender.com npm test`.
+The script checks sign up and login, token-protected sockets, roles, the approval flow, the queue, chat and persistence.
+
+## Security and reliability
+- Passwords are hashed with bcrypt. Login uses signed JWTs. The socket handshake rejects invalid tokens.
+- Every privileged action (playback, roles, remove, queue play) is re-checked on the server, never only in the UI.
+- Login and sign up are rate limited per IP (in memory). Request bodies are size limited and basic security headers are set.
+- `GET /health` is a cheap endpoint for uptime monitors. The frontend also pings it on load and shows a "waking up" banner when the free host is asleep.
+- Async routes return clean JSON errors, and the UI has an error boundary instead of a blank screen.
 
 ## Deployment
 - **Backend:** Render Web Service, root directory `backend`, build `npm install`, start `npm start`, `NODE_VERSION=24`.
@@ -68,4 +80,4 @@ React app --Socket.IO (token in handshake)--> auth middleware --> event handlers
 - Live room state is in server memory, so a single backend instance. To scale: Socket.IO Redis adapter and shared room state in Redis.
 - On a free Render instance the filesystem is ephemeral, so the SQLite file is lost on redeploy or restart. A managed database (for example Postgres) is the fix.
 - CORS is open for the demo. In production, restrict it to the frontend origin.
-- JWT is kept in browser storage. httpOnly cookies would be safer. No rate limiting yet.
+- JWT is kept in browser storage. httpOnly cookies would be safer. The rate limiter is in memory, so it is per instance.
