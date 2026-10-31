@@ -2,8 +2,8 @@
 
 Watch YouTube together in real time. Users sign up, create or join rooms, and playback stays in sync for everyone. Roles decide who can control the video.
 
-**Live app:** _paste your Vercel URL here_
-**Backend API:** _paste your Render URL here_
+**Live app:** https://keen-gumption-c63085.netlify.app
+**Backend API:** https://watch-party-kddd.onrender.com
 
 > The backend runs on a free Render instance. It sleeps after about 15 minutes without traffic, so the first request can take up to a minute. Open the live app once and wait for it to load before testing.
 
